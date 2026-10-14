@@ -20,6 +20,8 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+  # build job 没有 checkout，gh 无法从 .git 推断仓库，显式指定
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   prepare:
