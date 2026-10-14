@@ -1,0 +1,7 @@
+# 离线镜像包（体积大，只放 Release，不进仓库）
+*.tar
+*.tar.part*
+*.zst
+
+# 本地部署时生成的实际配置（各 .env.example 模板保留，见 docker/.gitignore）
+.env

@@ -1,0 +1,106 @@
+name: Build Dify Offline Package
+
+# 构建 Dify 离线安装包：拉取全部镜像 -> 导出 tar -> 分卷 -> 上传到 Release
+# 用法：Actions 页面点 "Run workflow"，或推送 v* 标签自动触发。
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "发布到哪个 Release 标签，例如 v1.17.1"
+        required: true
+        default: "v1.17.1"
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+
+jobs:
+  prepare:
+    name: 准备 Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 创建 Release（已存在则跳过）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG 已存在，跳过创建。"
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "Dify 离线安装包 $RELEASE_TAG" \
+              --notes-file RELEASE_NOTES.md
+          fi
+
+  build:
+    name: 导出 ${{ matrix.image }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - "langgenius/dify-api:1.17.1"
+          - "langgenius/dify-web:1.17.1"
+          - "langgenius/dify-sandbox:0.2.15"
+          - "langgenius/dify-agent-backend:1.17.1"
+          - "langgenius/dify-agent-local-sandbox:1.17.1"
+          - "langgenius/dify-plugin-daemon:0.6.10-local"
+          - "postgres:15-alpine"
+          - "redis:6-alpine"
+          - "ubuntu/squid:latest"
+          - "nginx:latest"
+          - "busybox:latest"
+          - "cr.weaviate.io/semitechnologies/weaviate:1.39.2"
+    steps:
+      - name: 查看磁盘
+        run: df -h / /mnt 2>/dev/null || df -h /
+
+      - name: 拉取镜像
+        run: docker pull "${{ matrix.image }}"
+
+      - name: 导出为 tar（超过 1.9GB 自动分卷）
+        run: |
+          set -euo pipefail
+          name="$(printf '%s' '${{ matrix.image }}' | tr '/:' '__')"
+          echo "导出 ${{ matrix.image }} -> ${name}.tar"
+          docker save -o "${name}.tar" "${{ matrix.image }}"
+          size=$(stat -c%s "${name}.tar")
+          echo "${name}.tar = ${size} bytes"
+          if [ "$size" -gt 1900000000 ]; then
+            echo "超过 1.9GB（GitHub Release 单文件上限 2GB），执行分卷。"
+            split -b 1900M -d -a 2 "${name}.tar" "${name}.tar.part"
+            rm -f "${name}.tar"
+          fi
+          ls -lh
+
+      - name: 上传到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" ./*.tar* --clobber
+
+  finalize:
+    name: 生成 SHA256 校验和
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 汇总校验和
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '.assets[] | select(.name != "SHA256SUMS.txt") | "\(.digest | sub("sha256:";""))  \(.name)"' \
+            > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$RELEASE_TAG" SHA256SUMS.txt --clobber

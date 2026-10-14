@@ -1,0 +1,11 @@
+# 部署文件需要在 Linux 上执行，统一使用 LF 换行，避免 CRLF 导致脚本报错
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
