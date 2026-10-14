@@ -42,6 +42,16 @@ jobs:
               --notes-file RELEASE_NOTES.md
           fi
 
+      - name: 打包部署文件并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          zip -qr "dify-docker-deploy-${version}.zip" docker
+          ls -lh "dify-docker-deploy-${version}.zip"
+          gh release upload "$RELEASE_TAG" "dify-docker-deploy-${version}.zip" load-images.sh --clobber
+
   build:
     name: 导出 ${{ matrix.image }}
     needs: prepare
